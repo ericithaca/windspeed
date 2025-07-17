@@ -1,0 +1,73 @@
+import requests
+import json
+
+# Config
+USER_AGENT = "mygeoapp.com, contact@mygeoapp.com"
+LAT, LON = 41.86, -70.93  # Example location (Acushnet, MA)
+
+def fetch_grid_metadata():
+    url = f"https://api.weather.gov/points/{LAT},{LON}"
+    resp = requests.get(url, headers={"User-Agent": USER_AGENT})
+    resp.raise_for_status()
+    data = resp.json()
+    return data["properties"]["gridId"], data["properties"]["gridX"], data["properties"]["gridY"]
+
+def fetch_observations(grid_id, gridx, gridy):
+    url = f"https://api.weather.gov/gridpoints/{grid_id}/{gridx},{gridy}/observations"
+    resp = requests.get(url, headers={"User-Agent": USER_AGENT})
+    resp.raise_for_status()
+    return resp.json()
+
+def wind_speed_to_color(speed):
+    if speed is None:
+        return "rgba(0, 0, 0, 0.5)"
+    if speed < 5:
+        return "rgba(0, 0, 255, 0.5)"       # Blue
+    elif speed < 10:
+        return "rgba(0, 255, 255, 0.5)"     # Cyan
+    elif speed < 15:
+        return "rgba(255, 255, 0, 0.5)"     # Yellow
+    elif speed < 20:
+        return "rgba(255, 165, 0, 0.5)"     # Orange
+    else:
+        return "rgba(255, 0, 0, 0.5)"       # Red
+
+def build_geojson(observations):
+    features = []
+    for obs in observations.get("features", []):
+        props = obs["properties"]
+        geom = obs["geometry"]
+
+        wind_spd = props.get("windSpeed", {}).get("value")
+        wind_dir = props.get("windDirection", {}).get("value")
+
+        if wind_spd is None or wind_dir is None:
+            continue
+
+        feature = {
+            "type": "Feature",
+            "geometry": geom,
+            "properties": {
+                "windSpeed_mps": wind_spd,
+                "windDirection_deg": wind_dir,
+                "color": wind_speed_to_color(wind_spd),
+                "timestamp": props.get("timestamp")
+            }
+        }
+        features.append(feature)
+
+    return {
+        "type": "FeatureCollection",
+        "features": features
+    }
+
+def main():
+    grid_id, gx, gy = fetch_grid_metadata()
+    obs = fetch_observations(grid_id, gx, gy)
+    geojson = build_geojson(obs)
+    with open("wind_data.geojson", "w") as f:
+        json.dump(geojson, f, indent=2)
+    print("Saved as wind_data.geojson")
+
+if __name__ == "__main__":
+    main()
